@@ -52,25 +52,44 @@ def query_laptops(brand: str = None, price_vnd: float = None, ram: float = None)
             print(f"Warning: Không tìm thấy laptop hãng '{brand}', fallback tìm kiếm trên toàn bộ dữ liệu.")
             filtered_df = df.copy()
 
-    # 4. Chuẩn bị dữ liệu cho KNN
+    # 4. CHUẨN BỊ KHÔNG GIAN VECTƠ (VECTO HÓA CÁC ĐẶC TRƯNG)
+    # Trong KNN, mỗi laptop được biểu diễn như 1 điểm dữ liệu trong không gian đa chiều.
+    # Ở đây ta sử dụng không gian 2 chiều gồm đặc trưng: [Giá tiền (Price), Dung lượng RAM].
+    # Để tránh việc đặc trưng Giá tiền (giá trị hàng triệu) áp đảo hoàn toàn RAM (giá trị nhỏ từ 4-64),
+    # ta sử dụng các cột đã được chuẩn hóa (scaled_price và scaled_ram) bằng StandardScaler.
     X_train = filtered_df[['scaled_price', 'scaled_ram']].values
     
-    # Scale query vector [Price, RAM]
+    # Chuyển đổi yêu cầu (Query) của người dùng thành một Vector truy vấn 2 chiều: [Price, RAM].
     query_vector = np.array([[price_inr, ram]])
+    # Chuẩn hóa Vector truy vấn theo đúng tỷ lệ của StandardScaler (công thức z-score) để cùng không gian với X_train.
     query_scaled = scaler.transform(query_vector)
 
-    # 5. Huấn luyện KNN trên dữ liệu đã lọc và query
+    # 5. KHỞI TẠO MÔ HÌNH VÀ TÌM LÂN CẬN GẦN NHẤT (KNN)
+    # Xác định K (số lượng lân cận cần tìm). Ở đây mặc định tìm Top 3 máy phù hợp nhất.
     k = min(3, len(filtered_df))
     if k == 0:
         return []
 
+    # Khởi tạo mô hình KNN (sử dụng NearestNeighbors từ scikit-learn):
+    # - n_neighbors=k: số lượng lân cận cần tìm (k = 3).
+    # - metric='euclidean': sử dụng công thức tính khoảng cách hình học thẳng Euclidean giữa 2 điểm A(x1, y1) và B(x2, y2):
+    #   d = sqrt((x1 - x2)^2 + (y1 - y2)^2)
     nn = NearestNeighbors(n_neighbors=k, metric='euclidean')
+    
+    # "Fit" tập dữ liệu: Nạp toàn bộ các điểm laptop (X_train) vào không gian để chuẩn bị tính khoảng cách.
     nn.fit(X_train)
 
+    # Thực hiện truy vấn tìm kiếm điểm gần nhất:
+    # - nn.kneighbors() tính khoảng cách Euclidean từ điểm yêu cầu (query_scaled) đến tất cả các điểm laptop.
+    # - Trả về: 
+    #   + distances: danh sách các khoảng cách hình học nhỏ nhất (càng nhỏ nghĩa là độ tương đồng/phù hợp càng cao).
+    #   + indices: chỉ mục của 3 sản phẩm laptop tương ứng trong danh sách filtered_df.
     distances, indices = nn.kneighbors(query_scaled)
     
-    # 6. Trả về kết quả dưới dạng danh sách dicts
+    # 6. TRẢ VỀ KẾT QUẢ ĐÃ LỌC
+    # Trích xuất thông tin chi tiết của 3 laptop có khoảng cách gần nhất
     top_laptops = filtered_df.iloc[indices[0]].copy()
+    # Gắn thêm khoảng cách hình học (distance) vào từng laptop để AI/hệ thống biết mức độ tương đồng
     top_laptops['distance'] = distances[0]
     
     # Thay thế NaN bằng None để tránh lỗi serialize JSON khi các cột phụ bị khuyết dữ liệu
